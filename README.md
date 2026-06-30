@@ -206,6 +206,34 @@ WARNING stagehand: ✗ train/2 failed: ValueError('diverged')
 INFO stagehand: flow 'sweep' done in 4.2s — 4 ok, 1 failed, 1 skipped
 ```
 
+## Checks & the cookbook
+
+A step's *body* does the work; a **check** says whether it actually succeeded.
+`stagehand.checks` is a small library of reusable correctness predicates — each
+returns a `(ok, issues)` result that composes with `&` / `|` / `~`, so it drops
+straight into `filter` / `with_retry(check=…)`:
+
+```python
+from stagehand.checks import produced, finite, exit_ok
+healthy = lambda r: exit_ok(r["exit"]) & produced(r["ckpt"]) & finite(r["loss"])
+good = flow.filter("gate", trained, healthy)     # drop diverged / no-checkpoint cells
+```
+
+Kernel: `produced` · `exists` · `json_has` · `valid_image` · `finite` · `in_range` ·
+`exit_ok` · `tests_pass` · `uri_exists` (the last two shell out to pytest / gcloud).
+
+The [`cookbook/`](cookbook/) collects **reliability recipes**. Abstractly there are
+only **two kinds of step** — both "produce → validate → persist a versioned artifact":
+- [`cookbook/run_step.py`](cookbook/run_step.py) — **run**: execute the code → validate
+  the artifact (`exit_ok &` your check) → persist it + record a pointer; idempotent. One
+  recipe for training / eval / plots / reports (the artifact check is a parameter).
+- [`cookbook/implementation_step.py`](cookbook/implementation_step.py) — **implement**:
+  an agent builds a feature, a **review** gates it, it retries with the review's findings
+  ≤ N times, and the approved change is PR'd.
+
+Both use **seams** (compute backend, storage sink, coding agent, review, `gh`) you swap
+for your real stack, and compose into the loop: implement → run.
+
 ## Examples
 
 Runnable with faked compute, so they go anywhere in a couple of seconds:
