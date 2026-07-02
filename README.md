@@ -327,6 +327,24 @@ inputs degrade to a cache *miss*, never a wrong hit. Cached tasks show
 `<key>.json` files — share it on a shared filesystem, delete it to drop the
 cache.
 
+### Cheap-first: smoke configs, not an engine mode
+
+Every sweep deserves an N=2, five-minute rehearsal that runs the **full** DAG —
+analysis and figures included — before the fleet launches. Don't reach for an
+engine switch: make the workflow take a config and ship a smaller one next to
+the real one.
+
+```python
+cfg  = yaml.safe_load(Path(args.config).read_text())   # sweep.yaml | sweep_smoke.yaml
+flow = Flow("runs", config=cfg, memo="runs/memo")      # config lands in manifest.json
+cells = build_cells(cfg)                               # smoke cfg ⇒ fewer, cheaper cells
+```
+
+Because the config's values ride into each step through its *inputs*, the smoke
+run's memo keys differ from the real run's automatically — a rehearsal can
+never replay into (or out of) the real cache — and `manifest.json` records
+exactly which config produced what.
+
 ## Examples
 
 Runnable with faked compute, so they go anywhere in a couple of seconds:
