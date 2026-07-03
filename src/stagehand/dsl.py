@@ -86,9 +86,11 @@ def each(fn, items, **kwargs):
     return [do(fn, x, **kwargs) for x in items]
 
 
-async def run(*, stop_when=None, refresh=False):
-    """Run the current `with flow(...)` graph; returns the final `RunState`."""
-    return await current().run(stop_when=stop_when, refresh=refresh)
+async def run(*, stop_when=None, check=False, refresh=False):
+    """Run the current `with flow(...)` graph; returns the final `RunState`.
+    `check=True` verifies the graph first (`Flow.check()`) and raises
+    `FlowCheckError` before doing any work if it's malformed."""
+    return await current().run(stop_when=stop_when, check=check, refresh=refresh)
 
 
 def _name(fn, suffix):

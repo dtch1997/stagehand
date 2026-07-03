@@ -38,6 +38,13 @@ experiment runs.
               identical flow is free (crashed sweeps resume), changed steps re-run,
               and `run(refresh=True)` is the explicit "new samples" act.
 """
+from importlib.metadata import PackageNotFoundError, version as _version
+
+try:
+    __version__ = _version("stagehand")
+except PackageNotFoundError:            # running from a source tree, uninstalled
+    __version__ = "0.0.0"
+
 from ._log import log, enable_logging
 from .monitor import monitor, mark, read_monitors, read_graph, Monitor, SUFFIX
 from .dashboard import render_dashboard, default_note, COLORS
@@ -55,6 +62,7 @@ from .serve import serve, parse_tunnel_url
 from . import checks
 
 __all__ = [
+    "__version__",
     "log", "enable_logging", "checks",
     "monitor", "mark", "read_monitors", "read_graph", "Monitor", "SUFFIX",
     "render_dashboard", "default_note", "COLORS",

@@ -1,7 +1,7 @@
 """A worked sweep on the stagehand engine — the shape of a real experiment, with
 the compute faked out so it runs anywhere in a couple of seconds.
 
-    train ──> gate(filter) ──> eval ──> manifest(reduce)
+    train ──> gate(filter) ──> eval ──> collect(reduce)
 
 You *declare* the DAG; the engine streams it — eval(cell_0) starts the moment
 train(cell_0) is healthy, while train(cell_2) is still going. There's no barrier
@@ -58,16 +58,17 @@ async def main():
     trained = flow.map("train", cells, train_one)
     healthy = flow.filter("gate", trained, is_healthy)         # drop the dud, stream survivors
     evals = flow.map("eval", healthy, eval_one)                # eval_i waits on train_i only
-    manifest = flow.reduce("manifest", evals, lambda rs: rs)   # the one barrier
+    collected = flow.reduce("collect", evals, lambda rs: rs)   # the one barrier
 
     async with live_dashboard(runs_dir, title="example sweep") as status_html:
         state = await flow.run()
 
-    (runs_dir / "manifest.json").write_text(
-        json.dumps(manifest.results()[0], indent=2))
+    # NB: not runs/manifest.json — the engine owns that file (run provenance)
+    (runs_dir / "results.json").write_text(
+        json.dumps(collected.results()[0], indent=2))
     print(f"done — {state.done} tasks ok, {state.failed} failed, "
           f"{state.skipped} skipped")
-    print(f"open {status_html} ; manifest at {runs_dir / 'manifest.json'}")
+    print(f"open {status_html} ; results at {runs_dir / 'results.json'}")
 
 
 if __name__ == "__main__":

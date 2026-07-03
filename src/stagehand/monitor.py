@@ -23,9 +23,12 @@ state, or the engine which tracks task results separately). Pass ``cleanup=False
 to *persist* the file at its final state instead — "done", or "failed" with the
 error recorded — e.g. so a dashboard can render a finished run after the fact.
 On exception the error is recorded and re-raised (so the caller still sees it)
-regardless of ``cleanup``.
+regardless of ``cleanup``. Cancellation (`asyncio.CancelledError`) is not a
+failure: it records state "stopped" with no error — the unit was pre-empted,
+e.g. by a flow's `stop_when`.
 """
 from __future__ import annotations
+import asyncio
 import json, time
 from contextlib import contextmanager
 from pathlib import Path
@@ -74,6 +77,9 @@ def monitor(name, total, path, *, parent=None, meta=None, min_interval=0.5,
     try:
         yield Monitor(state, flush)
         state["state"] = "done"
+    except asyncio.CancelledError:       # pre-empted, not failed
+        state["state"] = "stopped"
+        raise
     except BaseException as e:           # erred out: record it, then re-raise
         state["state"] = "failed"
         state["extra"]["error"] = repr(e)

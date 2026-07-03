@@ -1,7 +1,5 @@
 # stagehand
 
-**[dtch1997.github.io/stagehand](https://dtch1997.github.io/stagehand/)** · a one-page tour.
-
 A tiny **declarative engine for orchestrating steps at scale** — with live monitoring.
 
 You declare *what* work needs doing and how the pieces depend on each other; the engine
@@ -62,7 +60,13 @@ winner = best.result
 - `flow.reduce(node, source, fn)` — the **barrier**: `fn(list_of_results)` once all upstream tasks are terminal, over the survivors.
 - `flow.expand(node, source, fn)` — **dynamic fan-out**: `fn(result) -> iterable`, each element becomes a task (when the width isn't known until runtime).
 - `flow.add(id, fn, deps=[…])` — raw escape hatch for irregular graphs.
-- `await flow.run(stop_when=None, check=False)` — schedule the graph, bounded by `concurrency`; returns the final `RunState` (`.results`, `.done`, `.failed`, `.skipped`).
+- `await flow.run(stop_when=None, check=False)` — schedule the graph, bounded by `concurrency`; returns the final `RunState` (`.results`, `.done`, `.failed`, `.skipped`, `.stopped`).
+
+A task that raises is captured (never aborts the run): its dependents skip, its
+monitor file records the error **and full traceback**, and the failure is appended to
+`runs_dir/errors.jsonl` — so a task that died six hours into a sweep has its stack
+trace on disk. When `stop_when` fires, everything in flight is cancelled and ends in
+a distinct `stopped` state (not `failed`, not stuck `running`).
 
 ### Policies: fan-out and retry
 
@@ -190,7 +194,8 @@ with monitor("cell_s0", total=256, path="runs/cell_s0/train.progress.json",
         m.update(loss=train_step(batch))     # advance + record fields (throttled writes)
 ```
 
-On clean exit the state goes `done`; on exception `failed` (error captured) and re-raises.
+On clean exit the state goes `done`; on exception `failed` (error captured) and
+re-raises; on cancellation `stopped` (pre-empted, not a failure).
 `mark(path, …)` patches a unit post-hoc; `read_monitors(root)` loads the whole tree.
 Monitors are **ephemeral by default** (the progress file is removed on exit); pass
 `monitor(…, cleanup=False)` to persist the final state (e.g. for a dashboard to read

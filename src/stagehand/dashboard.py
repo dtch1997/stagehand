@@ -21,13 +21,15 @@ import re
 import time
 
 COLORS = {"running": "#1a73e8", "done": "#188038", "failed": "#d93025",
-          "pruned": "#f9ab00", "pending": "#9aa0a6"}
+          "pruned": "#f9ab00", "pending": "#9aa0a6", "stopped": "#5f6368"}
 _PRUNE_PREFIXES = ("filtered", "best_of", "retry")   # "failed" markers that mean pruned
 
 
 def default_note(extra: dict) -> str:
-    """Render `extra` fields as `k=v`, omitting the error (surfaced separately)."""
-    return " · ".join(f"{k}={v}" for k, v in extra.items() if k != "error")
+    """Render `extra` fields as `k=v`, omitting the error/traceback (surfaced
+    separately)."""
+    return " · ".join(f"{k}={v}" for k, v in extra.items()
+                      if k not in ("error", "traceback"))
 
 
 def _esc(s) -> str:
@@ -69,6 +71,8 @@ def _node_state(c) -> str:
         return "running"
     if c.get("failed"):
         return "failed"
+    if c.get("stopped"):
+        return "stopped"
     if c.get("total") and c.get("done", 0) + c.get("pruned", 0) == c["total"]:
         return "done"
     return "running" if c.get("done") else "pending"
@@ -80,7 +84,8 @@ def _mid(name):
 
 
 _MERMAID_CLASS = {"running": ("#e8f0fe", "#1a73e8"), "done": ("#e6f4ea", "#188038"),
-                  "failed": ("#fce8e6", "#d93025"), "pending": ("#f1f3f4", "#9aa0a6")}
+                  "failed": ("#fce8e6", "#d93025"), "pending": ("#f1f3f4", "#9aa0a6"),
+                  "stopped": ("#f1f3f4", "#5f6368")}
 
 
 def _mermaid(graph, counts) -> str:
@@ -122,16 +127,27 @@ def _unit_key(m):
     return (node, int(idx) if idx.isdigit() else 0, m["name"])
 
 
+def _err_cell(ex: dict) -> str:
+    """The error column: short errors inline; long ones (or any with a recorded
+    traceback) truncated behind a `<details>` holding the full text."""
+    err = ex.get("error") or ""
+    tb = ex.get("traceback") or ""
+    if not (tb or len(err) > 90):
+        return _esc(err)
+    full = err + ("\n\n" + tb if tb else "")
+    return (f'<details><summary>{_esc(err[:90])}</summary>'
+            f'<pre>{_esc(full)}</pre></details>')
+
+
 def _row(m, indent, note_fn) -> str:
     st = _state_of(m)
     pad = "&nbsp;" * (4 * indent)
     ex = m.get("extra") or {}
     note = note_fn(ex)
-    err = (ex.get("error") or "")[:90]
     return (f'<tr><td>{pad}{_esc(m["name"])}</td>'
             f'<td class=state style="background:{COLORS.get(st, "#000")}">{st}</td>'
             f'<td class=prog>{m.get("done", 0)}/{m.get("total", 0)}</td>'
-            f'<td>{_esc(note)}</td><td class=err>{_esc(err)}</td></tr>')
+            f'<td>{_esc(note)}</td><td class=err>{_err_cell(ex)}</td></tr>')
 
 
 def _status_table(monitors, note_fn) -> str:
@@ -159,7 +175,10 @@ table.status td,table.status th{border-bottom:1px solid #eee;padding:4px 8px}
 table.status th{text-align:left;color:#5f6368;font-weight:600}
 td.state{color:#fff;text-align:center;border-radius:4px}
 td.prog{text-align:right;white-space:nowrap}
-td.err{color:#d93025}"""
+td.err{color:#d93025}
+td.err pre{white-space:pre-wrap;font-size:12px;background:#fafafa;
+border:1px solid #eee;border-radius:4px;padding:8px;margin:4px 0}
+td.err summary{cursor:pointer}"""
 
 
 def render_dashboard(monitors, started, *, title="stagehand", note_fn=default_note,

@@ -59,10 +59,25 @@ def test_orphan_with_unknown_parent_is_treated_as_root():
     assert "lonely" in html and "1 units" in html
 
 
-def test_error_is_truncated():
+def test_long_error_truncated_in_summary_full_text_in_details():
     long = "x" * 200
     html = render_dashboard([_m("u", "failed", 0, 1, extra={"error": long})], started=0)
-    assert "x" * 90 in html and "x" * 91 not in html
+    assert "<summary>" + "x" * 90 + "</summary>" in html    # truncated at a glance
+    assert "x" * 200 in html                                # full text one click away
+
+
+def test_short_error_is_inline_without_details():
+    html = render_dashboard([_m("u", "failed", 0, 1, extra={"error": "boom"})],
+                            started=0)
+    assert "boom" in html and "<details>" not in html
+
+
+def test_traceback_rendered_in_details_not_note():
+    m = _m("u", "failed", 0, 1,
+           extra={"error": "boom", "traceback": "Traceback ...\nValueError: boom"})
+    html = render_dashboard([m], started=0)
+    assert "<details>" in html and "ValueError: boom" in html
+    assert "traceback=" not in html                         # not dumped into the note
 
 
 def test_table_is_present_without_a_graph_and_draws_no_dag():

@@ -6,6 +6,7 @@ import json
 
 from stagehand import Flow, Memo, fn_fingerprint, memo_key
 from stagehand import flow, do, run
+from stagehand.monitor import read_monitors
 
 
 def _run(f, **kw):
@@ -197,6 +198,24 @@ def test_dsl_memo_and_cache_flag(tmp_path):
     asyncio.run(main())
     asyncio.run(main())
     assert calls == [21]                       # replayed via the DSL too
+
+
+def test_cached_run_persists_monitor_files(tmp_path):
+    calls = []
+
+    def build(runs_dir):
+        f = Flow(runs_dir, memo=tmp_path / "memo")
+        f.map("w", [1, 2], _counted(calls, lambda x: x))
+        return f
+
+    _run(build(tmp_path / "r1"))
+    _run(build(tmp_path / "r2"))                       # fully cached replay
+    assert calls == [1, 2]                             # nothing re-ran
+    mons = {m["name"]: m for m in read_monitors(tmp_path / "r2")}
+    assert mons["w/0"]["state"] == "done"              # persisted, not cleaned up
+    assert mons["w/0"]["meta"]["cached"] is True
+    assert mons["w/0"]["extra"]["cached"] is True      # rendered in the note column
+    assert mons["w"]["state"] == "done"
 
 
 def test_memo_entry_records_provenance(tmp_path):

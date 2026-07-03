@@ -2,7 +2,7 @@
 run). Async tests drive their own loop via asyncio.run."""
 import asyncio
 
-from stagehand import flow, do, fanout, retry, each, run
+from stagehand import FlowCheckError, flow, do, fanout, retry, each, run
 
 
 def test_do_chain_infers_dependency():
@@ -123,6 +123,29 @@ def test_failed_dep_skips_dependent():
             return f, state
     f, state = asyncio.run(body())
     assert state.failed == 1 and state.skipped == 1
+
+
+def test_run_check_true_raises_before_running():
+    ran = []
+
+    def make() -> str:
+        return "s"
+
+    async def use(x: int) -> int:
+        ran.append(x)
+        return x
+
+    async def body():
+        with flow():
+            s = do(make)
+            do(use, s)
+            await run(check=True)
+    try:
+        asyncio.run(body())
+        assert False, "expected FlowCheckError"
+    except FlowCheckError:
+        pass
+    assert ran == []                     # raised before doing any work
 
 
 def test_do_outside_flow_raises():

@@ -26,6 +26,7 @@ its diff.
 from __future__ import annotations
 import asyncio
 import json
+import shutil
 import tempfile
 from dataclasses import dataclass, replace
 from typing import Any
@@ -77,13 +78,18 @@ async def subprocess_backend(spec: AgentSpec) -> AgentOutcome:
         *argv, cwd=spec.cwd,
         stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
     try:
-        out, _err = await asyncio.wait_for(proc.communicate(), timeout=spec.timeout)
+        out, err = await asyncio.wait_for(proc.communicate(), timeout=spec.timeout)
     except asyncio.TimeoutError:
         proc.kill()
         await proc.wait()
         return AgentOutcome(ok=False, summary=f"timed out after {spec.timeout}s",
                             name=spec.name)
+    except asyncio.CancelledError:       # step cancelled (stop_when): no orphans
+        proc.kill()
+        await proc.wait()
+        raise
     text = out.decode(errors="replace") if out else ""
+    err_text = err.decode(errors="replace") if err else ""
     data = {}
     try:
         data = json.loads(text or "{}")
@@ -93,12 +99,13 @@ async def subprocess_backend(spec: AgentSpec) -> AgentOutcome:
     if m is not None:
         m.set(status="done" if proc.returncode == 0 else "error",
               cost=data.get("total_cost_usd"))
+    # a failing `claude` often writes only to stderr — surface it, don't drop it
     return AgentOutcome(
         ok=(proc.returncode == 0 and not data.get("is_error")),
-        summary=data.get("result") or text[:500],
+        summary=data.get("result") or text[:500] or err_text[:500],
         cost=data.get("total_cost_usd"),
         session_id=data.get("session_id"),
-        name=spec.name, raw=data or text)
+        name=spec.name, raw=data or text or err_text)
 
 
 def flightdeck_backend(**run_opts):
@@ -152,7 +159,10 @@ async def _with_worktree(base_cwd, run_in):
     if rc != 0:
         raise RuntimeError("isolation='worktree' needs a git repo at cwd")
     wt = tempfile.mkdtemp(prefix="stagehand-agent-")
-    await _git("worktree", "add", "--detach", wt, "HEAD", cwd=base_cwd)
+    rc, _, err = await _git("worktree", "add", "--detach", wt, "HEAD", cwd=base_cwd)
+    if rc != 0:                # e.g. no commits yet — don't run in an empty dir
+        shutil.rmtree(wt, ignore_errors=True)
+        raise RuntimeError(f"git worktree add failed: {err.strip() or rc}")
     try:
         outcome = await run_in(wt)
         await _git("add", "-A", cwd=wt)
@@ -167,7 +177,7 @@ async def _with_worktree(base_cwd, run_in):
 # ---- the step ------------------------------------------------------------- #
 def agent(prompt, *inputs, name=None, tools=DEFAULT_TOOLS, isolation=None,
           backend=None, permission_mode="acceptEdits", model=None, timeout=None,
-          cwd=".", after=()):
+          cwd=".", after=(), flow=None):
     """A coding-agent step. `prompt` is a string, or a callable built from upstream
     results: `agent(lambda issue: f"fix {issue}", issue_handle)`. `inputs` (handles
     OK) feed that callable. Returns a one-task `Handle[AgentOutcome]`.
@@ -176,6 +186,9 @@ def agent(prompt, *inputs, name=None, tools=DEFAULT_TOOLS, isolation=None,
     diff (use it whenever agents run in parallel and edit files). `backend`
     defaults to `subprocess_backend`; pass `flightdeck_backend()` for live
     monitoring. Composes with `fanout` (best-of-N) and `retry` (retry-on-failure).
+
+    The step attaches to the innermost `with flow(...)` block; on the `Flow`
+    surface (no DSL context), pass the flow explicitly: `agent(..., flow=my_flow)`.
     """
     be = backend or _default_backend
     nm = name or "agent"
@@ -188,6 +201,7 @@ def agent(prompt, *inputs, name=None, tools=DEFAULT_TOOLS, isolation=None,
             return await _with_worktree(cwd, lambda wt: be(replace(spec, cwd=wt)))
         return await be(spec)
 
-    out = current().spawn(_run, inputs, name=nm, after=after)
+    f = flow if flow is not None else current()
+    out = f.spawn(_run, inputs, name=nm, after=after)
     out.elem_type = AgentOutcome     # typed for downstream check()/judge
     return out

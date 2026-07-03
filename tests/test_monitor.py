@@ -1,4 +1,5 @@
 """Unit tests for the monitor primitive (file-backed progress + error state)."""
+import asyncio
 import json
 
 import pytest
@@ -31,6 +32,16 @@ def test_failure_records_error_and_reraises(tmp_path):
     s = _load(p)
     assert s["state"] == "failed"
     assert "boom" in s["extra"]["error"] and s["done"] == 1   # progress preserved at point of failure
+
+
+def test_cancellation_records_stopped_not_failed(tmp_path):
+    p = tmp_path / "u.progress.json"
+    with pytest.raises(asyncio.CancelledError):
+        with monitor("u", total=1, path=p, min_interval=0, cleanup=False):
+            raise asyncio.CancelledError()
+    s = _load(p)
+    assert s["state"] == "stopped"
+    assert "error" not in s["extra"]     # pre-empted, not a failure
 
 
 def test_cleanup_removes_file_on_success(tmp_path):

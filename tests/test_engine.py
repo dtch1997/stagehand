@@ -186,6 +186,30 @@ def test_stop_when_halts_early():
     assert len(ran) < 20                            # did not run the whole graph
 
 
+def test_stop_when_leaves_consistent_terminal_state(tmp_path):
+    async def quick(i):
+        return i
+
+    async def slow(i):
+        await asyncio.sleep(30)
+        return i
+
+    flow = Flow(tmp_path, concurrency=3)
+    flow.map("q", [0], quick)
+    flow.map("s", range(4), slow)
+    state = asyncio.run(flow.run(stop_when=lambda s: s.done >= 1))
+    assert state.stopped >= 1
+    # nothing is left claiming to run — cancelled and never-scheduled tasks alike
+    # end in the distinct terminal state "stopped", not "failed" or stuck "running"
+    assert all(t.state in ("done", "failed", "skipped", "stopped")
+               for t in flow.tasks.values())
+    mons = {m["name"]: m for m in read_monitors(tmp_path)}
+    in_flight = [m for n, m in mons.items() if n.startswith("s/")]
+    assert in_flight and all(m["state"] == "stopped" for m in in_flight)
+    assert "error" not in in_flight[0].get("extra", {})   # cancelled ≠ failed
+    assert mons["s"]["state"] == "stopped"                # node file, too
+
+
 # ---- monitoring ----------------------------------------------------------- #
 def test_writes_node_and_task_monitor_files(tmp_path):
     async def fn(i):
@@ -218,6 +242,29 @@ def test_writes_graph_topology_and_task_deps(tmp_path):
     # per-task deps are persisted so the dashboard can trace lineage
     mons = {m["name"]: m for m in read_monitors(tmp_path)}
     assert mons["gate/0"]["meta"]["deps"] == ["train/0"]
+
+
+def test_failure_persists_traceback_and_errors_jsonl(tmp_path):
+    async def boom(i):
+        raise ValueError("kaput")
+    flow = Flow(tmp_path)
+    flow.map("w", [0], boom)
+    asyncio.run(flow.run())
+    m = {m["name"]: m for m in read_monitors(tmp_path)}["w/0"]
+    assert m["state"] == "failed" and "kaput" in m["extra"]["error"]
+    assert "ValueError: kaput" in m["extra"]["traceback"]     # full stack on disk
+    lines = [json.loads(l) for l in
+             (tmp_path / "errors.jsonl").read_text().splitlines()]
+    assert lines[0]["task"] == "w/0" and lines[0]["node"] == "w"
+    assert "ValueError: kaput" in lines[0]["traceback"]
+
+
+def test_filtered_task_has_no_traceback_noise(tmp_path):
+    flow = Flow(tmp_path)
+    src = flow.map("src", [1, 2], ident)
+    flow.filter("keep", src, lambda x: x == 1)
+    asyncio.run(flow.run())
+    assert not (tmp_path / "errors.jsonl").exists()   # pruned ≠ failed
 
 
 def test_filtered_task_marked_failed_on_dashboard(tmp_path):
@@ -265,11 +312,25 @@ def test_best_of_async_judge_and_raiser_dropping():
     assert out == 2                             # attempt 1 raised and was dropped
 
 
-def test_best_of_all_raise_returns_exception():
+def test_best_of_all_raise_raises():
     async def fn(u, *, attempt=0):
         raise ValueError(f"boom {attempt}")
-    out = asyncio.run(best_of(fn, n=2, score=lambda r: r)("u"))
-    assert isinstance(out, ValueError)
+    try:
+        asyncio.run(best_of(fn, n=2, score=lambda r: r)("u"))
+        assert False, "expected ValueError"
+    except ValueError as e:
+        assert "boom" in str(e)
+
+
+def test_best_of_all_raise_fails_task_and_skips_downstream():
+    async def fn(u, *, attempt=0):
+        raise ValueError("boom")
+    flow = Flow()
+    solved = flow.map("solve", [1], best_of(fn, n=2, score=lambda r: r))
+    used = flow.map("use", solved, ident)
+    state = asyncio.run(flow.run())
+    assert state.failed == 1 and state.skipped == 1
+    assert used.results() == []          # no exception instance flows downstream
 
 
 def test_best_of_requires_exactly_one_selector():
@@ -319,6 +380,16 @@ def test_with_retry_returns_last_failing_when_exhausted():
     out = asyncio.run(
         with_retry(fn, check=lambda r: (False, ["nope"]), max_attempts=3)("u"))
     assert out["attempt"] == 2
+
+
+def test_with_retry_raises_when_final_attempt_raises():
+    async def fn(u, *, attempt=0, feedback=None):
+        raise ValueError(f"boom {attempt}")
+    try:
+        asyncio.run(with_retry(fn, check=lambda r: (True, []), max_attempts=2)("u"))
+        assert False, "expected ValueError"
+    except ValueError as e:
+        assert "boom 1" in str(e)        # the last attempt's exception, re-raised
 
 
 def test_with_retry_policy_in_map():

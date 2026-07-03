@@ -31,6 +31,7 @@ import asyncio
 import inspect
 import json
 import time
+import traceback
 from collections import deque
 from contextlib import asynccontextmanager
 from contextvars import ContextVar
@@ -57,9 +58,9 @@ def current_monitor():
     the dashboard — used by agent steps to surface status/last-action/tokens."""
     return _task_monitor.get()
 
-PENDING, RUNNING, DONE, FAILED, SKIPPED = (
-    "pending", "running", "done", "failed", "skipped")
-_TERMINAL = frozenset((DONE, FAILED, SKIPPED))
+PENDING, RUNNING, DONE, FAILED, SKIPPED, STOPPED = (
+    "pending", "running", "done", "failed", "skipped", "stopped")
+_TERMINAL = frozenset((DONE, FAILED, SKIPPED, STOPPED))
 
 T = TypeVar("T")
 
@@ -182,6 +183,10 @@ class RunState:
     @property
     def skipped(self):
         return self._count(SKIPPED)
+
+    @property
+    def stopped(self):
+        return self._count(STOPPED)
 
 
 class Flow:
@@ -537,6 +542,12 @@ class Flow:
                 for r in running:
                     r.cancel()
                 await asyncio.gather(*running, return_exceptions=True)
+                # anything the stop pre-empted — cancelled in flight, or never
+                # scheduled — ends in a distinct terminal state, so monitors and
+                # node files don't claim a deliberately-stopped run is running
+                for t in self.tasks.values():
+                    if t.state in (PENDING, RUNNING):
+                        t.state = STOPPED
                 break
 
         if self.runs_dir is not None:
@@ -601,8 +612,9 @@ class Flow:
                     if path is not None:
                         with _monitor(t.id, 1, path, parent=t.node,
                                       meta={"node": t.node, "deps": list(t.deps),
-                                            "cached": True}, min_interval=0) as m:
-                            m.update()
+                                            "cached": True}, min_interval=0,
+                                      cleanup=False) as m:  # persist for the dashboard
+                            m.update(cached=True)
                     self._finish(t, cached, path)
                     if self.runs_dir is not None:
                         self._flush_node(t.node)
@@ -633,10 +645,19 @@ class Flow:
                 if path is not None:
                     mark(path, state="failed",
                          extra={"error": "filtered: " + "; ".join(map(str, f.issues))})
+            except asyncio.CancelledError:               # run stopped (stop_when)
+                t.state = STOPPED
+                log.debug("■ %s stopped", t.id)
+                raise
             except Exception as e:                       # captured; never aborts run
                 t.state = FAILED
                 t.error = e
+                tb = traceback.format_exc()
                 log.warning("✗ %s failed: %r", t.id, e)
+                if path is not None:
+                    mark(path, extra={"traceback": tb})
+                if self.runs_dir is not None:
+                    self._log_error(t, e, tb)
             finally:
                 if self.runs_dir is not None:
                     self._flush_node(t.node)
@@ -651,6 +672,16 @@ class Flow:
             else:
                 yield
 
+    def _log_error(self, t, e, tb):
+        """Append the failure (with its full traceback) to ``runs_dir/errors.jsonl``
+        — the monitor file and dashboard only carry ``repr(e)``, so this is where a
+        `train/47 failed six hours in` gets a stack trace on disk."""
+        line = {"task": t.id, "node": t.node, "time": time.time(),
+                "error": repr(e), "traceback": tb}
+        self.runs_dir.mkdir(parents=True, exist_ok=True)
+        with (self.runs_dir / "errors.jsonl").open("a") as f:
+            f.write(json.dumps(line) + "\n")
+
     def _flush_node(self, node):
         tasks = [t for t in self.tasks.values()
                  if t.node == node and t.state != SKIPPED and t.run is not None]
@@ -658,10 +689,21 @@ class Flow:
             return
         done = sum(1 for t in tasks if t.state == DONE)
         failed = sum(1 for t in tasks if t.state == FAILED)
-        node_state = DONE if all(t.state in _TERMINAL for t in tasks) else RUNNING
+        stopped = sum(1 for t in tasks if t.state == STOPPED)
+        if stopped:
+            node_state = STOPPED
+        elif all(t.state in _TERMINAL for t in tasks):
+            node_state = DONE
+        else:
+            node_state = RUNNING
+        extra = {}
+        if failed:
+            extra["failed"] = failed
+        if stopped:
+            extra["stopped"] = stopped
         data = {"name": node, "parent": None, "total": len(tasks), "done": done,
                 "state": node_state, "started": self._start, "ended": None,
-                "extra": ({"failed": failed} if failed else {}), "meta": {}}
+                "extra": extra, "meta": {}}
         p = self.runs_dir / node / "_node.progress.json"
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(json.dumps(data))
@@ -886,8 +928,9 @@ def best_of(fn, n, *, judge=None, score=None, concurrency=None, monitor_path=Non
     ``score(result) -> float`` (keep the max; ties to the earliest attempt).
 
     Attempts that raised are dropped; if *all* raise, the first exception is
-    returned. With `monitor_path` (``result -> path | None``) the losing attempts
-    are marked `failed` ("best_of: not selected") on the dashboard.
+    re-raised (the task fails, and the engine skips its downstream as usual).
+    With `monitor_path` (``result -> path | None``) the losing attempts are
+    marked `failed` ("best_of: not selected") on the dashboard.
 
         flow.map("solve", units, best_of(solve, n=4, score=reward))
     """
@@ -901,7 +944,7 @@ def best_of(fn, n, *, judge=None, score=None, concurrency=None, monitor_path=Non
             concurrency or n)
         ok = [r for r in results if not isinstance(r, BaseException)]
         if not ok:
-            return next(r for r in results if isinstance(r, BaseException))
+            raise next(r for r in results if isinstance(r, BaseException))
 
         if judge is not None:
             win = judge(ok)
@@ -938,9 +981,12 @@ def with_retry(fn, *, check, max_attempts=3, feedback=None, monitor_path=None):
     `check(result) -> (ok, issues)` is a gate predicate; `feedback` defaults to the
     `issues` list, or pass ``feedback(result, issues) -> any`` to transform it.
 
-    Returns the first passing result, else the last failing result (or exception).
-    Superseded attempts are marked `failed` on the dashboard if `monitor_path` is
-    given. Retries are sequential per item; fan items out across the node.
+    Returns the first passing result, else the last failing result — a value your
+    downstream can inspect. If the *final* attempt raised, the exception is
+    re-raised instead (the task fails; no exception instance ever flows on as a
+    result). Superseded attempts are marked `failed` on the dashboard if
+    `monitor_path` is given. Retries are sequential per item; fan items out
+    across the node.
 
         flow.map("solve", units, with_retry(solve, check=parses))
     """
@@ -965,6 +1011,8 @@ def with_retry(fn, *, check, max_attempts=3, feedback=None, monitor_path=None):
                     mark(p, state="failed",
                          extra={"error": f"retry: superseded (attempt {attempt}): "
                                          + "; ".join(map(str, issues))})
+        if isinstance(last, BaseException):
+            raise last
         return last
 
     return retry_unit

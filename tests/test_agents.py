@@ -5,7 +5,7 @@ import json
 import subprocess
 from pathlib import Path
 
-from stagehand import (flow, do, fanout, retry, run, agent, current_monitor,
+from stagehand import (Flow, flow, do, fanout, retry, run, agent, current_monitor,
                        AgentOutcome, AgentSpec)
 from stagehand import agents
 from stagehand.monitor import read_monitors
@@ -86,6 +86,13 @@ def test_set_default_backend_is_used():
     assert asyncio.run(body()).ok
 
 
+def test_agent_on_flow_surface_without_dsl():
+    f = Flow()
+    out = agent("do it", backend=fake_backend, name="a", flow=f)
+    asyncio.run(f.run())
+    assert out.result.ok and "do it" in out.result.summary
+
+
 # ---- worktree isolation --------------------------------------------------- #
 def test_agent_worktree_isolation_captures_diff(tmp_path):
     repo = tmp_path / "repo"
@@ -116,6 +123,21 @@ def test_agent_worktree_isolation_captures_diff(tmp_path):
     assert "stagehand-agent-" not in wts
 
 
+def test_worktree_add_failure_raises_not_empty_dir(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=repo, check=True)   # unborn HEAD
+
+    async def run_in(wt):
+        raise AssertionError("must not run in a broken worktree")
+
+    try:
+        asyncio.run(agents._with_worktree(str(repo), run_in))
+        assert False, "expected RuntimeError"
+    except RuntimeError as e:
+        assert "worktree add failed" in str(e)
+
+
 # ---- subprocess backend --------------------------------------------------- #
 def test_subprocess_backend_argv_and_parse(monkeypatch):
     captured = {}
@@ -138,6 +160,51 @@ def test_subprocess_backend_argv_and_parse(monkeypatch):
     assert a[0] == "claude" and "-p" in a and "hi" in a and "json" in a
     assert captured["cwd"] == "/r"
     assert out.ok and out.summary == "done" and out.cost == 0.2 and out.session_id == "abc"
+
+
+def test_subprocess_backend_surfaces_stderr(monkeypatch):
+    class _Proc:
+        returncode = 1
+        async def communicate(self):
+            return (b"", b"claude: exploded\n")
+
+    async def fake_exec(*argv, cwd=None, stdout=None, stderr=None):
+        return _Proc()
+
+    monkeypatch.setattr(agents.asyncio, "create_subprocess_exec", fake_exec)
+    out = asyncio.run(agents.subprocess_backend(AgentSpec(prompt="hi")))
+    assert not out.ok and "exploded" in out.summary   # stderr not silently dropped
+
+
+def test_subprocess_backend_kills_child_on_cancel(monkeypatch):
+    class _HangProc:
+        returncode = None
+        killed = False
+        async def communicate(self):
+            await asyncio.sleep(30)
+        def kill(self):
+            self.killed = True
+        async def wait(self):
+            return 0
+
+    hang = _HangProc()
+
+    async def fake_exec(*argv, cwd=None, stdout=None, stderr=None):
+        return hang
+
+    monkeypatch.setattr(agents.asyncio, "create_subprocess_exec", fake_exec)
+
+    async def body():
+        task = asyncio.ensure_future(
+            agents.subprocess_backend(AgentSpec(prompt="hi")))
+        await asyncio.sleep(0.01)
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+    asyncio.run(body())
+    assert hang.killed                                # no orphaned agent process
 
 
 # ---- current_monitor: a step streams its own progress --------------------- #
