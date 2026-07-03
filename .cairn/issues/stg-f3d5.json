@@ -1,0 +1,15 @@
+{
+  "assignee": null,
+  "blocked_by": [],
+  "closed_at": null,
+  "created": "2026-07-03T14:54:49+00:00",
+  "description": "Fine <=1k tasks, quadratic beyond: RunState count properties rescan all tasks per completion (called from stop_when each wakeup); _flush_node rewrites the node file scanning all node tasks on every task finish; _propagate_skips is a fixpoint loop over all tasks per scheduler iteration. Maintain incremental counters / per-node task indexes / a dirty set instead if multi-thousand-task runs become common.",
+  "id": "stg-f3d5",
+  "labels": [],
+  "parent": null,
+  "priority": 3,
+  "status": "open",
+  "title": "Scheduler perf at scale: quadratic rescans past ~1k tasks",
+  "type": "task",
+  "updated": "2026-07-03T14:54:49+00:00"
+}

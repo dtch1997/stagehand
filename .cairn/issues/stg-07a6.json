@@ -1,0 +1,15 @@
+{
+  "assignee": null,
+  "blocked_by": [],
+  "closed_at": null,
+  "created": "2026-07-03T14:54:49+00:00",
+  "description": "Breaking-change bundle to decide together at 2.0 (from the 2026-07-02 review): (1) 'flow' (DSL context manager) vs 'Flow' (class) \u2014 README itself uses both names; importing both shadows one; consider renaming the CM (e.g. open_flow). (2) do(fn, *args, name=None, after=(), cache=True, **kwargs) reserves name/after/cache \u2014 a user fn taking those kwargs can't receive them; consider _name/_after or positional-only. (3) Naming asymmetry: engine best_of/with_retry fan over a collection via map; DSL fanout/retry wrap a single unit \u2014 'fanout' sounds like map but isn't. (4) serve.parse_tunnel_url is pure back-compat with no in-repo caller \u2014 remove at 2.0.",
+  "id": "stg-07a6",
+  "labels": [],
+  "parent": null,
+  "priority": 3,
+  "status": "open",
+  "title": "2.0 API seams: flow/Flow shadowing, do() kwarg collisions, fanout-vs-map naming",
+  "type": "task",
+  "updated": "2026-07-03T14:54:49+00:00"
+}

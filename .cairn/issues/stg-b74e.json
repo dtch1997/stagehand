@@ -1,0 +1,15 @@
+{
+  "assignee": null,
+  "blocked_by": [],
+  "closed_at": null,
+  "created": "2026-07-03T14:54:49+00:00",
+  "description": "AgentSpec.timeout defaults to None, so a hung claude stalls the flow silently until the stale-task indicator (not yet built) or a human notices. Consider a generous default (e.g. 1-2h) with None as explicit opt-out. Decide together with the dashboard stale-indicator issue.",
+  "id": "stg-b74e",
+  "labels": [],
+  "parent": null,
+  "priority": 3,
+  "status": "open",
+  "title": "agent(): consider a default timeout",
+  "type": "task",
+  "updated": "2026-07-03T14:54:49+00:00"
+}

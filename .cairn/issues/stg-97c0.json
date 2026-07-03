@@ -1,0 +1,15 @@
+{
+  "assignee": null,
+  "blocked_by": [],
+  "closed_at": null,
+  "created": "2026-07-03T14:54:49+00:00",
+  "description": "Nice-to-haves from the 2026-07-02 review: (1) per-task duration column (started/ended already in the monitor files, unrendered); (2) show skipped counts (skipped tasks write no file and are excluded from node totals); (3) 'stale for Xm' indicator when a task's monitor file hasn't been written recently \u2014 the only signal a hung agent gives; (4) bundle or fall back the CDN mermaid for offline pods; (5) cap/paginate the table for multi-thousand-task runs; (6) fleet-level cost aggregation (per-agent cost lands on monitors; nothing sums it).",
+  "id": "stg-97c0",
+  "labels": [],
+  "parent": null,
+  "priority": 3,
+  "status": "open",
+  "title": "Dashboard: duration column, skipped counts, stale-task indicator, offline mermaid, cost rollup",
+  "type": "task",
+  "updated": "2026-07-03T14:54:49+00:00"
+}

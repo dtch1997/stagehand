@@ -1,0 +1,15 @@
+{
+  "assignee": null,
+  "blocked_by": [],
+  "closed_at": null,
+  "created": "2026-07-03T14:54:49+00:00",
+  "description": "(1) spawn's implicit gather rule (scalar handle args => all-required; a list of handles => reduce-over-survivors) is invisible at the call site and documented only in a docstring \u2014 promote to README, or make explicit e.g. do(fn, survivors(handles)). (2) memo dep sentinel '<absent>' can collide with a genuine string result (engine._memo_key) \u2014 use a non-string sentinel in the key material. (3) Handle.result is shape-polymorphic (scalar vs list by kind).",
+  "id": "stg-736f",
+  "labels": [],
+  "parent": null,
+  "priority": 3,
+  "status": "open",
+  "title": "spawn() gather heuristic + memo dep sentinel: make explicit",
+  "type": "task",
+  "updated": "2026-07-03T14:54:49+00:00"
+}
