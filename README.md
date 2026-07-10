@@ -151,8 +151,8 @@ async with live_dashboard("runs", title="my run"):
 `serve` is a thin lazy wrapper over the [**lobby**](https://github.com/dtch1997/lobby)
 library: the dashboard registers with the shared hub daemon, so every run lives under
 **one** tunnel URL with a central index page listing all your dashboards and reports
-(`name`/`title` label the entry; the tunnel itself comes from lobby's
-[marquee](https://github.com/dtch1997/marquee) dependency). lobby is imported only when
+(`name`/`title` label the entry; the tunnel itself is lobby's built-in
+pluggable-provider seam, `lobby.tunnel`). lobby is imported only when
 you call `serve()`, so the core stays dependency-free — install it with
 `pip install git+https://github.com/dtch1997/lobby`.
 

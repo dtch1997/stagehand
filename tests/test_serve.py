@@ -42,9 +42,9 @@ def test_serve_errors_clearly_without_lobby(monkeypatch, tmp_path):
         serve(tmp_path)
 
 
-def test_parse_tunnel_url_errors_clearly_without_marquee(monkeypatch):
-    _hide(monkeypatch, "marquee")
-    with pytest.raises(RuntimeError, match="marquee"):
+def test_parse_tunnel_url_errors_clearly_without_lobby(monkeypatch):
+    _hide(monkeypatch, "lobby")
+    with pytest.raises(RuntimeError, match="lobby"):
         parse_tunnel_url("https://x.trycloudflare.com")
 
 
@@ -70,7 +70,7 @@ def test_serve_name_defaults_to_directory_name(monkeypatch, tmp_path):
 
 
 def test_parse_tunnel_url_delegates(monkeypatch):
-    fake = types.ModuleType("marquee")
+    fake = types.ModuleType("lobby")
     fake.parse_tunnel_url = lambda text: "PARSED"
-    monkeypatch.setitem(sys.modules, "marquee", fake)
+    monkeypatch.setitem(sys.modules, "lobby", fake)
     assert parse_tunnel_url("anything") == "PARSED"

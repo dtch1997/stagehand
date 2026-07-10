@@ -43,11 +43,5 @@ def serve(directory, *, entry="status.html", name=None, title=None, port=None):
 
 def parse_tunnel_url(text: str):
     """Pull a Cloudflare quick-tunnel URL out of log text (or None). Delegates to
-    `marquee` (kept for back-compat)."""
-    try:
-        import marquee
-    except ModuleNotFoundError as e:
-        raise RuntimeError(
-            "parse_tunnel_url is implemented by the `marquee` library — install it with "
-            "`pip install git+https://github.com/dtch1997/marquee`.") from e
-    return marquee.parse_tunnel_url(text)
+    `lobby` (kept for back-compat)."""
+    return _lobby().parse_tunnel_url(text)
